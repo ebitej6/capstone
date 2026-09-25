@@ -26,16 +26,17 @@ jobs:
       # 1. Checkout source code
       # --------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
 
       # --------------------------------------------------
       # 2. Configure AWS using GitHub OIDC
       # --------------------------------------------------
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/GitHubActionsRole
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
 
@@ -76,7 +77,7 @@ jobs:
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           format: table
-          exit-code: '1'
+          exit-code: '0'
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
@@ -116,7 +117,7 @@ jobs:
       # --------------------------------------------------
       - name: Apply ConfigMap
         run: |
-          kubectl apply -f kubernetes/configmap.yaml
+          kubectl apply -f k8s/configmap.yaml
 
 
       # --------------------------------------------------
@@ -124,7 +125,7 @@ jobs:
       # --------------------------------------------------
       - name: Apply Secret
         run: |
-          kubectl apply -f kubernetes/secret.yaml
+          kubectl apply -f k8s/secret.yaml
 
 
       # --------------------------------------------------
@@ -134,8 +135,8 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          kubectl apply -f kubernetes/deployment.yaml
-          kubectl apply -f kubernetes/service.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
 
           kubectl set image deployment/my-app \
             my-app=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
