@@ -1,0 +1,161 @@
+name: Build, Scan and Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: my-app
+  EKS_CLUSTER_NAME: my-eks-cluster
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-scan-deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------
+      # 1. Checkout source code
+      # --------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+
+      # --------------------------------------------------
+      # 2. Configure AWS using GitHub OIDC
+      # --------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # --------------------------------------------------
+      # 3. Verify AWS authentication
+      # --------------------------------------------------
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # --------------------------------------------------
+      # 4. Login to Amazon ECR
+      # --------------------------------------------------
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+
+      # --------------------------------------------------
+      # 5. Build Docker image
+      # --------------------------------------------------
+      - name: Build Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            .
+
+
+      # --------------------------------------------------
+      # 6. Scan Docker image with Trivy
+      # --------------------------------------------------
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+
+      # --------------------------------------------------
+      # 7. Push image to Amazon ECR
+      # --------------------------------------------------
+      - name: Push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+
+      # --------------------------------------------------
+      # 8. Configure kubectl for EKS
+      # --------------------------------------------------
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $EKS_CLUSTER_NAME
+
+
+      # --------------------------------------------------
+      # 9. Verify Kubernetes connection
+      # --------------------------------------------------
+      - name: Verify EKS connection
+        run: |
+          kubectl get nodes
+
+
+      # --------------------------------------------------
+      # 10. Apply ConfigMap
+      # --------------------------------------------------
+      - name: Apply ConfigMap
+        run: |
+          kubectl apply -f kubernetes/configmap.yaml
+
+
+      # --------------------------------------------------
+      # 11. Apply Secret
+      # --------------------------------------------------
+      - name: Apply Secret
+        run: |
+          kubectl apply -f kubernetes/secret.yaml
+
+
+      # --------------------------------------------------
+      # 12. Deploy application
+      # --------------------------------------------------
+      - name: Deploy application
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          kubectl apply -f kubernetes/deployment.yaml
+          kubectl apply -f kubernetes/service.yaml
+
+          kubectl set image deployment/my-app \
+            my-app=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+
+      # --------------------------------------------------
+      # 13. Wait for rolling deployment
+      # --------------------------------------------------
+      - name: Wait for deployment
+        run: |
+          kubectl rollout status deployment/my-app --timeout=180s
+
+
+      # --------------------------------------------------
+      # 14. Verify deployment
+      # --------------------------------------------------
+      - name: Verify pods
+        run: |
+          kubectl get pods
+
+      - name: Verify service
+        run: |
+          kubectl get service my-app-service

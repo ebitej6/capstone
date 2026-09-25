@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: my-app
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: my-app
+
+    spec:
+      containers:
+        - name: my-app
+          image: 717958588159.dkr.ecr.us-east-1.amazonaws.com/my-app:latest
+          imagePullPolicy: Always
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+
+          ports:
+            - containerPort: 80
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: my-app-config
+            - secretRef:
+                name: my-app-secret
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+      restartPolicy: Always

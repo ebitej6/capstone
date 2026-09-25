@@ -1,0 +1,7 @@
+.tfstate
+.tfvars
+.tfstate.backup
+.terraform/
+.env
+k8s/secret.yaml
+node_modules/
